@@ -17,9 +17,9 @@ this as a production sign-off.
 - Nonmembers cannot read rooms or their revision signals.
 - Private answer tables are inaccessible to frontend roles.
 - Only the host can configure/start a game.
-- A moderator plus at least two players is required.
+- Two people can play with the host also moderating; larger groups require a separate moderator and at least two players.
 - Answers are hidden from other players and from the moderator before judging.
-- Players cannot score themselves. Points outside 0–2 are rejected.
+- Only the moderator can score. In two-person mode the host can score both guesses, including their own. Points outside 0–2 are rejected.
 - Repeated submissions preserve the original answer.
 - All players must be scored before publication.
 - Targets rotate, old-round submissions are rejected, and points accumulate once.
@@ -38,7 +38,7 @@ npm test
 npm run build
 ```
 
-`npm test` contains 12 test groups; each group checks multiple assertions.
+`npm test` contains 14 test groups; each group checks multiple assertions.
 
 ## Not verified here
 
@@ -88,3 +88,13 @@ be checked on your deployed HTTPS URL.
 ## Image previews
 
 The accompanying PNGs are static renders of the app’s DOM and CSS, with form controls and responsive CSS adapted for the HTML renderer. They are visual previews, not browser/device screenshots or proof of Safari layout behaviour. Browser capture was retried and remained unavailable.
+
+## Two-person upgrade verification (11 October 2026)
+
+All 14 database/interface test groups and the production build passed. Added
+checks cover host/guest submission order, hidden answers before both submit,
+automatic host moderator selection, both scores and standings, three rounds,
+restart, and returning to a separate moderator when a third person joins.
+The upgrade was also run twice against the original schema with an existing
+room: data and authenticated RPC permissions were preserved. No live Supabase
+or Vercel deployment was modified or tested.

@@ -6,7 +6,7 @@ A minimal PWA for guessing your friends’ first thoughts.
 
 **Deploy:** [SETUP.md](SETUP.md) walks through Supabase, GitHub, and Vercel.
 
-- 2–8 players and one moderator; the host may play or moderate.
+- With two people, both play and the host also moderates. With 3–9 people, choose a separate moderator; the other 2–8 people play.
 - 160 original questions in 8 selectable packs, including Germany & the UK.
 - 3, 5, 8, 10, 15, or 20 rounds, shuffled without repeats within a session.
 - Room codes and invitation links; anonymous sign-in happens in the background.
@@ -44,6 +44,7 @@ npm run preview
 | `src/demo.js` | Solo demonstration with simulated friends |
 | `src/questions.js` | All questions and pack definitions |
 | `supabase/schema.sql` | Database, access control, game rules and live signal |
+| `supabase/two-player-upgrade.sql` | Upgrade an existing database for two-person games |
 | `supabase/questions.sql` | Matching database question bank |
 | `public/` | PWA manifest, icons, service worker and offline page |
 | `tests/` | PostgreSQL, interface and browser integration tests |
@@ -52,7 +53,7 @@ npm run preview
 ## How multiplayer works
 
 Vercel serves the frontend. Supabase stores the room and validates all actions.
-The database decides when rounds advance; the browser cannot award itself points.
+The database decides when rounds advance; only the moderator can award points. In two-person mode, the host plays and scores both guesses after both submit.
 A room row lock serializes competing actions. Duplicate submissions do not replace
 an earlier answer, and each mutation includes the round number to reject stale requests.
 
@@ -69,7 +70,7 @@ then become visible to the whole room.
 
 This is a private friends-group app, not a public social network. There is no
 permanent friends list, account recovery, chat, or matchmaking. A shared room is
-how you connect. The moderator does not compete in that session. A disconnected
+how you connect. The separate moderator does not compete in larger groups. In two-person mode the host competes and also moderates, including scoring their own guess. A disconnected
 member can return with the same browser; there is no moderator takeover during a
 round. The host can end a stuck session and create another.
 

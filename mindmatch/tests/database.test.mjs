@@ -182,3 +182,53 @@ test("question deck uniqueness, removal and expired rooms", async () => {
     /Room unavailable/,
   );
 });
+
+test("two people: automatic host moderator, private answers, both scores and restart", async () => {
+  // Reapplying the upgrade must preserve data and function permissions.
+  const upgrade = await fs.readFile("supabase/two-player-upgrade.sql", "utf8");
+  await db.exec(upgrade);
+  await db.exec(upgrade);
+  r = await rpc(0, "mm_create", ["Host", 3, ["everyday"]], ["text", "integer", "text[]"]);
+  await assert.rejects(() => action(0, "start"), /two players and a moderator/);
+  await rpc(1, "mm_join", [r.code, "Friend"], ["text", "text"]);
+  // Even a previously selected guest moderator is replaced by the host.
+  await action(0, "moderator", { id: ids[1] });
+  r = await action(0, "start");
+  assert.equal(r.dualRole, true);
+  assert.equal(r.moderator, ids[0]);
+  assert.equal(r.target, ids[1]);
+  assert.equal((await rpc(1, "mm_state", [r.id], ["uuid"])).target, ids[0]);
+  for (let round = 1; round <= 3; round++) {
+    const first = round % 2;
+    const second = 1 - first;
+    r = await action(first, "submit", { own: "Secret" + first, guess: "Guess" + first });
+    assert.equal(r.stage, "answering");
+    assert.equal((await rpc(second, "mm_state", [r.id], ["uuid"])).answers.length, 0);
+    await assert.rejects(() => action(0, "score", { id: ids[0], points: 2 }), /Only the moderator/);
+    r = await action(second, "submit", { own: "Secret" + second, guess: "Guess" + second });
+    assert.equal(r.stage, "judging");
+    const host = await rpc(0, "mm_state", [r.id], ["uuid"]);
+    assert.equal(host.answers.length, 2);
+    assert.equal((await rpc(1, "mm_state", [r.id], ["uuid"])).answers.length, 1);
+    await assert.rejects(() => action(1, "score", { id: ids[0], points: 2 }), /Only the moderator/);
+    await assert.rejects(() => action(0, "publish"), /Score every player/);
+    await action(0, "score", { id: ids[0], points: 2 });
+    await action(0, "score", { id: ids[1], points: 1 });
+    r = await action(0, "publish");
+    assert.equal(r.answers.length, 2);
+    assert.deepEqual(r.players.map((p) => p.score), [round * 2, round]);
+    r = await action(0, "next");
+  }
+  assert.equal(r.stage, "finished");
+  r = await action(0, "restart");
+  assert.equal(r.dualRole, false);
+  assert.ok(r.players.every((p) => p.score === 0));
+  await rpc(2, "mm_join", [r.code, "Third"], ["text", "text"]);
+  r = await action(0, "start");
+  assert.equal(r.dualRole, false);
+  assert.equal(r.target, null);
+  await assert.rejects(() => action(0, "submit", { own: "A", guess: "B" }), /cannot submit/);
+  await action(1, "submit", { own: "A", guess: "B" });
+  r = await action(2, "submit", { own: "B", guess: "A" });
+  assert.equal(r.stage, "judging");
+});

@@ -281,3 +281,58 @@ test("demo, pack selection, input validation and moderator controls", async () =
   click(w, "publish");
   await until(() => text(w).includes("Round scores"), "demo reveal");
 });
+
+test("two-person interface: host plays and judges, both reach final standings", async () => {
+  const [host, friend] = [0, 1].map(createWindow);
+  input(host, "host-name", "Dual Host");
+  click(host, "round", '[data-value="3"]');
+  await until(() => !host.document.querySelector('[data-action="round"]').disabled, "rounds ready");
+  submit(host, "create-form");
+  await until(() => text(host).includes("Your room"), "create dual room");
+  assert.equal(host.document.querySelector('[data-action="start"]').disabled, true);
+  input(friend, "join-name", "Dual Friend");
+  input(friend, "code", host.document.querySelector(".room-code").textContent);
+  submit(friend, "join-form");
+  await until(() => text(friend).includes("Your room"), "join dual room");
+  refresh(host);
+  await until(() => !host.document.querySelector('[data-action="start"]').disabled, "two-person start enabled");
+  assert.equal(host.document.querySelector("#moderator").disabled, true);
+  assert.equal(host.document.querySelector("#moderator").value, ids[0]);
+  click(host, "start");
+  for (let round = 1; round <= 3; round++) {
+    for (const w of [host, friend]) refresh(w);
+    await until(() => host.document.querySelector("#own") && friend.document.querySelector("#own"), "both can answer");
+    assert.ok(text(host).includes("What would Dual Friend say?"));
+    assert.ok(text(friend).includes("What would Dual Host say?"));
+    const order = round % 2 ? [friend, host] : [host, friend];
+    input(order[0], "own", "Secret first");
+    input(order[0], "guess", "Guess first");
+    submit(order[0], "answer-form");
+    await until(() => !order[0].document.querySelector("#own"), "first submitted");
+    refresh(order[1]);
+    await until(() => order[1].document.querySelector("#own"), "second still answering");
+    assert.equal(order[1].document.querySelectorAll(".comparison").length, 0);
+    input(order[1], "own", "Secret second");
+    input(order[1], "guess", "Guess second");
+    submit(order[1], "answer-form");
+    await until(() => !order[1].document.querySelector("#own"), "second submitted");
+    refresh(host);
+    await until(() => host.document.querySelectorAll(".score-buttons").length === 2, "host scores both");
+    assert.equal(host.document.querySelector('[data-action="publish"]').disabled, true);
+    for (const id of [ids[0], ids[1]]) {
+      click(host, "score", `[data-id="${id}"][data-points="2"]`);
+      await until(() => !host.document.querySelector('[data-action="score"]').disabled, "score saved");
+    }
+    click(host, "publish");
+    await until(() => text(host).includes("Round scores"), "reveal dual");
+    assert.equal(host.document.querySelectorAll(".answer-review").length, 2);
+    click(host, "next");
+    await until(() => !text(host).includes("Round scores"), "advance dual");
+  }
+  assert.ok(text(host).includes("JOINT WINNERS"));
+  assert.equal(host.document.querySelectorAll(".standings .person").length, 2);
+  assert.ok(text(host).includes("Dual Host & Dual Friend"));
+  click(host, "restart");
+  await until(() => text(host).includes("Your room"), "restart dual");
+  await until(() => !host.document.querySelector('[data-action="start"]').disabled, "restart enabled");
+});

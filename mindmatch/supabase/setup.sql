@@ -8,7 +8,7 @@ revoke all on schema mindmatch from public, anon, authenticated;
 create table mindmatch.questions(id text primary key, pack text not null, text text not null);
 create table mindmatch.rooms(
  id uuid primary key default gen_random_uuid(), code text unique not null,
- host uuid not null, moderator uuid, stage text not null default 'lobby',
+ host uuid not null, moderator uuid, dual_role boolean not null default false, stage text not null default 'lobby',
  round integer not null default 0, rounds integer not null default 5,
  packs text[] not null, deck text[] not null default '{}',
  created_at timestamptz not null default now(), expires_at timestamptz not null default now()+interval '24 hours'
@@ -41,12 +41,12 @@ declare r mindmatch.rooms; u uuid:=auth.uid(); ps jsonb; ans jsonb; target_id uu
 begin
  select * into r from mindmatch.rooms where id=p_room;
  if not found or r.expires_at<=now() or not exists(select 1 from mindmatch.members where room=p_room and uid=u) then raise exception 'Room unavailable. Check the code or create a new room.'; end if;
- select array_agg(uid order by joined_at,uid) into ids from mindmatch.members where room=p_room and uid is distinct from r.moderator;
+ select array_agg(uid order by joined_at,uid) into ids from mindmatch.members where room=p_room and (r.dual_role or uid is distinct from r.moderator);
  idx:=array_position(ids,u);
  if idx is not null and cardinality(ids)>1 then target_id:=ids[1+mod(idx-1+1+mod(greatest(r.round-1,0),cardinality(ids)-1),cardinality(ids))]; end if;
  select coalesce(jsonb_agg(jsonb_build_object('id',m.uid,'name',m.name,'isHost',m.uid=r.host,'isModerator',m.uid=r.moderator,'online',m.seen_at>now()-interval '40 seconds','submitted',exists(select 1 from mindmatch.answers a where a.room=p_room and a.round=r.round and a.uid=m.uid),'score',coalesce((select sum(a.points) from mindmatch.answers a where a.room=p_room and a.uid=m.uid and (a.round<r.round or r.stage in ('reveal','finished'))),0)) order by m.joined_at,m.uid),'[]') into ps from mindmatch.members m where m.room=p_room;
  select coalesce(jsonb_agg(jsonb_build_object('uid',a.uid,'target',a.target,'own',a.own,'guess',a.guess,'points',case when r.stage in ('reveal','finished') or u=r.moderator then a.points else null end)),'[]') into ans from mindmatch.answers a where a.room=p_room and a.round=r.round and (a.uid=u or r.stage in ('reveal','finished') or (u=r.moderator and r.stage='judging'));
- return jsonb_build_object('id',r.id,'code',r.code,'host',r.host,'moderator',r.moderator,'stage',r.stage,'round',r.round,'rounds',r.rounds,'packs',r.packs,'players',ps,'answers',ans,'target',target_id,'me',u,'question',(select jsonb_build_object('id',q.id,'pack',q.pack,'text',q.text) from mindmatch.questions q where q.id=r.deck[r.round]),'revision',(select revision from public.mm_signals where id=p_room));
+ return jsonb_build_object('id',r.id,'code',r.code,'host',r.host,'moderator',r.moderator,'dualRole',r.dual_role,'stage',r.stage,'round',r.round,'rounds',r.rounds,'packs',r.packs,'players',ps,'answers',ans,'target',target_id,'me',u,'question',(select jsonb_build_object('id',q.id,'pack',q.pack,'text',q.text) from mindmatch.questions q where q.id=r.deck[r.round]),'revision',(select revision from public.mm_signals where id=p_room));
 end; $$;
 
 create function public.mm_create(p_name text,p_rounds integer,p_packs text[]) returns jsonb language plpgsql security definer set search_path='' as $$
@@ -97,7 +97,7 @@ begin
  if p_action in ('settings','moderator','remove','start','restart','end') and u<>r.host then raise exception 'Only the host can do that.'; end if;
  if p_action in ('settings','moderator','remove','start') and r.stage<>'lobby' then raise exception 'The game has already started.'; end if;
  if p_action in ('submit','score','publish','next') and (p_round is null or p_round<>r.round) then raise exception 'The round has changed. Please try again.'; end if;
- select array_agg(uid order by joined_at,uid) into ids from mindmatch.members where room=p_room and uid is distinct from r.moderator;
+ select array_agg(uid order by joined_at,uid) into ids from mindmatch.members where room=p_room and (r.dual_role or uid is distinct from r.moderator);
  total:=cardinality(ids);
  case p_action
  when 'settings' then
@@ -114,10 +114,16 @@ begin
   delete from mindmatch.members where room=p_room and uid=tid;
   update mindmatch.rooms set moderator=null where id=p_room and moderator=tid;
  when 'start' then
-  if r.moderator is null or total<2 then raise exception 'You need at least two players and a moderator.'; end if;
+  if (select count(*) from mindmatch.members where room=p_room)=2 then
+   -- Both members play; the host also scores after both have submitted.
+   update mindmatch.rooms set moderator=r.host,dual_role=true where id=p_room;
+  else
+   if r.moderator is null or coalesce(total,0)<2 then raise exception 'You need at least two players and a moderator.'; end if;
+   update mindmatch.rooms set dual_role=false where id=p_room;
+  end if;
   update mindmatch.rooms set deck=array(select id from mindmatch.questions where pack=any(r.packs) order by random() limit r.rounds),round=1,stage='answering' where id=p_room;
  when 'submit' then
-  if r.stage<>'answering' or u=r.moderator then raise exception 'You cannot submit answers now.'; end if;
+  if r.stage<>'answering' or (u=r.moderator and not r.dual_role) then raise exception 'You cannot submit answers now.'; end if;
   if length(trim(p_payload->>'own')) not between 1 and 180 or length(trim(p_payload->>'guess')) not between 1 and 180 or p_payload->>'own' is null or p_payload->>'guess' is null then raise exception 'Enter both answers, up to 180 characters each.'; end if;
   idx:=array_position(ids,u); tid:=ids[1+mod(idx-1+1+mod(r.round-1,total-1),total)];
   insert into mindmatch.answers(room,round,uid,target,own,guess) values(p_room,r.round,u,tid,trim(p_payload->>'own'),trim(p_payload->>'guess')) on conflict(room,round,uid) do nothing;
@@ -138,7 +144,7 @@ begin
  when 'restart' then
   if r.stage<>'finished' then raise exception 'Finish the game first.'; end if;
   delete from mindmatch.answers where room=p_room;
-  update mindmatch.rooms set stage='lobby',round=0,deck='{}' where id=p_room;
+  update mindmatch.rooms set stage='lobby',round=0,deck='{}',dual_role=false where id=p_room;
  when 'end' then update mindmatch.rooms set stage='closed' where id=p_room;
  else raise exception 'Unknown action.';
  end case;

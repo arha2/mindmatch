@@ -11,8 +11,8 @@ Vercel creates a linked Supabase account automatically; Supabase still powers th
 6. In **SQL Editor → New query**, paste all of `supabase/setup.sql` and click **Run** once.
 7. In **Authentication → Sign In / Providers**, enable **Anonymous sign-ins** and save.
 8. Back in Vercel, open **Deployments**, choose the latest deployment, and click **Redeploy**.
-9. Open your Vercel app link in Safari, create a room, and invite two friends.
-10. Pick one friend as moderator, then tap **Start game**.
+9. Open your Vercel app link in Safari, create a room, and invite a friend.
+10. With two people, tap **Start game**; the host plays and also moderates. With three or more people, pick a moderator before starting.
 
 **On iPhone:** use the website link in Safari, not the downloaded HTML file in Preview; install it with **Share → Add to Home Screen**.
 
@@ -20,6 +20,6 @@ Vercel creates a linked Supabase account automatically; Supabase still powers th
 
 **If online play says it is not configured:** check the resource is connected to Production, then redeploy again.
 
-**Already ran the earlier SQL files?** Skip step 6; the existing database works with this version.
+**Already ran the earlier SQL files?** Run `supabase/two-player-upgrade.sql` in your existing Supabase project instead of step 6, then deploy the updated frontend. This preserves existing tables, questions, rooms, and answers.
 
 Official integration guide: https://supabase.com/docs/guides/integrations/vercel-marketplace

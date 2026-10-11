@@ -51,6 +51,7 @@ const btn = (label, action, cls = "primary", extra = "") =>
   `<button class="${cls}" data-action="${action}" ${extra} ${busy ? "disabled" : ""}>${label}</button>`;
 const isHost = () => room?.me === room?.host;
 const isJudge = () => (demo ? judgeView : room?.me === room?.moderator);
+const isPlayer = (p) => room.dualRole || !p.isModerator;
 const pname = (id) => room.players.find((p) => p.id === id)?.name || "Player";
 function toast(text) {
   const el = document.querySelector("#toast");
@@ -67,7 +68,7 @@ function packSummary() {
   return `<div class="pack-summary"><span>${p.length} question packs <span class="subtle">· ${questions.filter((q) => p.includes(q.pack)).length} questions</span></span>${btn("Choose", "packs", "link")}</div>`;
 }
 function people() {
-  return `<aside><h2>${room.stage === "lobby" ? "In the room" : "Players"}</h2><div class="people">${room.players.map((p) => `<div class="person"><span class="avatar" aria-hidden="true">${e(p.name[0]?.toUpperCase())}</span><div><div class="name">${e(p.name)}${p.id === room.me ? ' <span class="subtle">(you)</span>' : ""}</div><div class="meta">${p.isModerator ? "Moderator" : p.isHost ? "Host · player" : "Player"}${!p.online ? " · away" : ""}</div></div><div class="right">${room.stage === "lobby" ? "" : p.isModerator ? "" : room.stage === "answering" ? (p.submitted ? "Submitted" : "Thinking…") : `<span class="points">${p.score}</span>`}</div></div>`).join("")}</div></aside>`;
+  return `<aside><h2>${room.stage === "lobby" ? "In the room" : "Players"}</h2><div class="people">${room.players.map((p) => `<div class="person"><span class="avatar" aria-hidden="true">${e(p.name[0]?.toUpperCase())}</span><div><div class="name">${e(p.name)}${p.id === room.me ? ' <span class="subtle">(you)</span>' : ""}</div><div class="meta">${p.isModerator ? (room.dualRole ? "Host · player · moderator" : "Moderator") : p.isHost ? "Host · player" : "Player"}${!p.online ? " · away" : ""}</div></div><div class="right">${room.stage === "lobby" ? "" : !isPlayer(p) ? "" : room.stage === "answering" ? (p.submitted ? "Submitted" : "Thinking…") : `<span class="points">${p.score}</span>`}</div></div>`).join("")}</div></aside>`;
 }
 function saveDraft() {
   if (!room) return;
@@ -120,16 +121,16 @@ function render() {
             ? "Session ended"
             : `Round ${room.round} <span class="subtle">/ ${room.rounds}</span>`;
     if (room.stage === "lobby") {
-      content = `<section class="sheet"><h2>Session</h2><div class="lobby-settings"><div class="field"><label for="moderator">Moderator</label><select id="moderator" ${!isHost() || demo || busy ? "disabled" : ""}><option value="">Choose a friend</option>${room.players.map((p) => `<option value="${e(p.id)}" ${p.id === room.moderator ? "selected" : ""}>${e(p.name)}</option>`).join("")}</select></div><div class="field"><label>Rounds</label>${isHost() ? rounds(room.rounds) : `<p>${room.rounds}</p>`}</div></div><div class="spaced">${isHost() ? packSummary() : `<p class="subtle">${room.packs.length} question packs</p>`}</div>${isHost() ? btn("Start game", "start", "primary wide", room.players.filter((p) => !p.isModerator).length < 2 || !room.moderator ? "disabled" : "") : '<p class="subtle">Waiting for the host to start.</p>'}${room.players.length < 3 ? '<p class="subtle spaced">Waiting for two players and a moderator.</p>' : ""}</section>`;
+      content = `<section class="sheet"><h2>Session</h2><div class="lobby-settings"><div class="field"><label for="moderator">Moderator</label><select id="moderator" ${!isHost() || demo || busy || room.players.length === 2 ? "disabled" : ""}><option value="">Choose a friend</option>${room.players.map((p) => `<option value="${e(p.id)}" ${p.id === (room.players.length === 2 ? room.host : room.moderator) ? "selected" : ""}>${e(p.name)}</option>`).join("")}</select></div><div class="field"><label>Rounds</label>${isHost() ? rounds(room.rounds) : `<p>${room.rounds}</p>`}</div></div><div class="spaced">${isHost() ? packSummary() : `<p class="subtle">${room.packs.length} question packs</p>`}</div>${isHost() ? btn("Start game", "start", "primary wide", room.players.length === 2 || (room.players.filter(isPlayer).length >= 2 && room.moderator) ? "" : "disabled") : '<p class="subtle">Waiting for the host to start.</p>'}${room.players.length === 2 ? '<p class="subtle spaced">Both people play. The host also moderates after both answers are submitted.</p>' : room.players.length < 2 ? '<p class="subtle spaced">Waiting for another player.</p>' : ""}</section>`;
     }
     if (["answering", "judging"].includes(room.stage)) {
       content = `<section class="question-card"><div class="question-meta">${e(packs[room.question.pack]?.name || "Question")}</div><h1>${e(room.question.text)}</h1></section>`;
       const mine = room.answers.find((a) => a.uid === room.me);
-      if (room.stage === "answering" && !isJudge() && !mine) {
+      if (room.stage === "answering" && (room.dualRole || !isJudge()) && !mine) {
         content += `<form id="answer-form"><div class="answer-grid"><div class="field"><label for="own">Your first thought</label><textarea id="own" maxlength="180" required>${e(draft.own)}</textarea></div><div class="field"><label for="guess">What would ${e(pname(room.target))} say?</label><textarea id="guess" maxlength="180" required>${e(draft.guess)}</textarea></div></div><button class="primary wide" ${busy ? "disabled" : ""}>${busy ? "Submitting…" : "Submit answers"}</button></form>`;
       } else if (room.stage === "judging" && isJudge()) {
         content += room.players
-          .filter((p) => !p.isModerator)
+          .filter(isPlayer)
           .map((p) => {
             const a = room.answers.find((a) => a.uid === p.id),
               actual = room.answers.find((x) => x.uid === a.target);
@@ -143,12 +144,12 @@ function render() {
           room.answers.some((a) => a.points === null) ? "disabled" : "",
         );
       } else {
-        content += `<section class="empty"><h2>${room.stage === "judging" ? "With the moderator" : isJudge() ? "Waiting for answers" : "Answers submitted"}</h2><p class="subtle">${room.stage === "judging" ? `${e(pname(room.moderator))} is scoring this round.` : `${room.players.filter((p) => p.submitted).length} of ${room.players.filter((p) => !p.isModerator).length} players submitted.`}</p>${demo && room.stage === "judging" ? btn("Open moderator view", "judge", "secondary spaced") : ""}</section>`;
+        content += `<section class="empty"><h2>${room.stage === "judging" ? "With the moderator" : isJudge() ? "Waiting for answers" : "Answers submitted"}</h2><p class="subtle">${room.stage === "judging" ? `${e(pname(room.moderator))} is scoring this round.` : `${room.players.filter((p) => p.submitted).length} of ${room.players.filter(isPlayer).length} players submitted.`}</p>${demo && room.stage === "judging" ? btn("Open moderator view", "judge", "secondary spaced") : ""}</section>`;
       }
     }
     if (room.stage === "reveal") {
       content = `<h1>Round scores</h1>${room.players
-        .filter((p) => !p.isModerator)
+        .filter(isPlayer)
         .map((p) => {
           const a = room.answers.find((a) => a.uid === p.id),
             actual = room.answers.find((x) => x.uid === a.target);
@@ -166,7 +167,7 @@ function render() {
     }
     if (room.stage === "finished") {
       const players = room.players
-          .filter((p) => !p.isModerator)
+          .filter(isPlayer)
           .sort((a, b) => b.score - a.score),
         winners = players.filter((p) => p.score === players[0].score);
       content = `<section class="winner"><span class="section-number">${winners.length > 1 ? "JOINT WINNERS" : "WINNER"}</span><h1>${winners.map((p) => e(p.name)).join(" & ")}</h1><div class="score">${players[0].score} <small>points</small></div></section><section class="standings">${players.map((p, i) => `<div class="person"><span class="subtle">${players.findIndex((x) => x.score === p.score) + 1}.</span><div class="name">${e(p.name)}</div><span class="right points">${p.score}</span></div>`).join("")}</section>${isHost() ? btn("Play again", "restart", "primary wide") : ""}`;
@@ -300,7 +301,7 @@ function packDialog() {
 }
 function help() {
   openDialog(
-    `<div class="row"><h2>Mindmatch</h2>${btn("Close", "close", "link")}</div><div class="help-text"><p>Two to eight players, plus one moderator. The host can also be the moderator.</p><p>Write your first thought, then guess the named friend’s answer. In larger groups, your target changes each round.</p><p>The moderator gives each guess 0, 1, or 2 points. Highest total wins; equal totals share the win.</p><p><strong>Install</strong><br>iPhone: open in Safari, then Share → Add to Home Screen.<br>Android: use your browser’s Install app or Add to Home screen option.</p><p>Online play needs a connection. Keep the same browser to resume your room; rooms expire after 24 hours. If someone is away, wait for them or end the session and create another.</p>${demo ? "<p>This demo uses simulated answers.</p>" : ""}${!configured ? "<p>Online setup is not configured. Follow SETUP.md in the source package, or try the demo.</p>" : ""}</div>${installPrompt ? btn("Install app", "install", "secondary wide") : ""}${room && isHost() && !demo ? btn("End session", "end", "secondary wide spaced") : ""}${
+    `<div class="row"><h2>Mindmatch</h2>${btn("Close", "close", "link")}</div><div class="help-text"><p>With two people, both play and the host also moderates after both submit. With three to nine people, choose a separate moderator; the others play.</p><p>Write your first thought, then guess the named friend’s answer. In larger groups, your target changes each round.</p><p>The moderator gives each guess 0, 1, or 2 points. Highest total wins; equal totals share the win.</p><p><strong>Install</strong><br>iPhone: open in Safari, then Share → Add to Home Screen.<br>Android: use your browser’s Install app or Add to Home screen option.</p><p>Online play needs a connection. Keep the same browser to resume your room; rooms expire after 24 hours. If someone is away, wait for them or end the session and create another.</p>${demo ? "<p>This demo uses simulated answers.</p>" : ""}${!configured ? "<p>Online setup is not configured. Follow SETUP.md in the source package, or try the demo.</p>" : ""}</div>${installPrompt ? btn("Install app", "install", "secondary wide") : ""}${room && isHost() && !demo ? btn("End session", "end", "secondary wide spaced") : ""}${
       room?.stage === "lobby" && isHost() && !demo
         ? `<details><summary>Remove a player</summary><div class="stack">${room.players
             .filter((p) => p.id !== room.me)
